@@ -38,11 +38,11 @@ double calculate_multilevel_obi(const json& bids, const json& asks, int levels =
 
 int main() {
     // --- RUNTIME CONFIGURATION ---
-    // Set to 0 to run infinitely, or set a specific number of seconds (e.g., 3600 for 1 hour)
     int MAX_RUNTIME_SECONDS = 120;
 
     std::ofstream file("orderbook_features.csv", std::ios::out);
-    file << "timestamp_ms,best_bid,best_ask,mid_price,spread,top_obi,multi_obi_5\n";
+    // Added latency_ms to the CSV header
+    file << "timestamp_ms,best_bid,best_ask,mid_price,spread,top_obi,multi_obi_5,latency_ms\n";
     file.flush();
 
     std::cout << std::fixed << std::setprecision(2);
@@ -58,7 +58,6 @@ int main() {
     std::cout << "Logging live BTC-USD features to orderbook_features.csv\n";
     std::cout << "Press Ctrl+C to stop manually.\n\n";
 
-    // Record the exact time the engine starts
     auto engine_start_time = std::chrono::steady_clock::now();
 
     while (true) {
@@ -69,12 +68,15 @@ int main() {
 
             if (elapsed_seconds >= MAX_RUNTIME_SECONDS) {
                 std::cout << "\nRuntime limit of " << MAX_RUNTIME_SECONDS << " seconds reached. Shutting down cleanly.\n";
-                break; // Exits the while loop
+                break;
             }
         }
 
         auto now = std::chrono::system_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+        // Start the latency stopwatch
+        auto fetch_start = std::chrono::steady_clock::now();
 
         cpr::Response r = cpr::Get(cpr::Url{ "https://api.exchange.coinbase.com/products/BTC-USD/book?level=2" },
             cpr::Header{ {"User-Agent", "QuantDataFetch/1.0"} });
@@ -98,14 +100,20 @@ int main() {
 
                 double multi_obi = calculate_multilevel_obi(data["bids"], data["asks"], 5);
 
+                // Stop the latency stopwatch right after the math completes
+                auto fetch_end = std::chrono::steady_clock::now();
+                auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(fetch_end - fetch_start).count();
+
                 std::cout << "[" << ms << "] Mid: $" << mid
                     << " | Spread: $" << spread
                     << " | Top OBI: " << std::setprecision(4) << top_obi
-                    << " | 5-Level OBI: " << multi_obi << "\n"
+                    << " | 5-Level OBI: " << multi_obi
+                    << " | Latency: " << latency << " ms\n"
                     << std::setprecision(2);
 
+                // Append latency to CSV
                 file << ms << "," << bid_p << "," << ask_p << "," << mid << ","
-                    << spread << "," << top_obi << "," << multi_obi << "\n";
+                    << spread << "," << top_obi << "," << multi_obi << "," << latency << "\n";
                 file.flush();
 
             }
